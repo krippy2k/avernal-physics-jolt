@@ -98,7 +98,15 @@ TEST(JoltWorld, SetPoseAndVelocity) {
     EXPECT_FLOAT_EQ(world->linear_velocity(id).z, 3.0f);
 }
 
-TEST(JoltWorld, RejectsInvalidShape) {
+TEST(JoltWorld, TorqueChangesAngularVelocity) {
     auto world = make_world();
-    EXPECT_FALSE(world->create_body({.shape = avernal::Shape::sphere(0.0f)}));
+    const auto id = world->create_body({
+        .shape = avernal::Shape::sphere(0.5f),
+        .position = {0.0f, 8.0f, 0.0f},
+    });
+    ASSERT_TRUE(id);
+
+    world->add_torque(id, {0.0f, 12.0f, 0.0f});
+    world->step(1.0f / 60.0f);
+    EXPECT_GT(world->angular_velocity(id).y, 0.0f);
 }

@@ -350,6 +350,11 @@ public:
         system_.GetBodyInterface().AddForce(to_jolt(id), to_jolt(force));
     }
 
+    void add_torque(BodyId id, const Vec3& torque) override {
+        AV_ENSURE(contains(id));
+        system_.GetBodyInterface().AddTorque(to_jolt(id), to_jolt(torque));
+    }
+
     void add_impulse(BodyId id, const Vec3& impulse) override {
         AV_ENSURE(contains(id));
         system_.GetBodyInterface().AddImpulse(to_jolt(id), to_jolt(impulse));
