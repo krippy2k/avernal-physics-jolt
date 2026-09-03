@@ -13,6 +13,8 @@
 #include <Jolt/Physics/Collision/CastResult.h>
 #include <Jolt/Physics/Collision/Shape/BoxShape.h>
 #include <Jolt/Physics/Collision/Shape/CapsuleShape.h>
+#include <Jolt/Physics/Collision/Shape/HeightFieldShape.h>
+#include <Jolt/Physics/Collision/Shape/MeshShape.h>
 #include <Jolt/Physics/Collision/Shape/SphereShape.h>
 #include <Jolt/Physics/PhysicsSystem.h>
 #include <Jolt/RegisterTypes.h>
@@ -223,6 +225,52 @@ public:
     return {};
 }
 
+[[nodiscard]] bool height_field_sample_count_ok(std::uint32_t count) noexcept {
+    return count >= 4 && count % 2 == 0;
+}
+
+[[nodiscard]] JPH::RefConst<JPH::Shape> make_height_field(const HeightFieldShapeDesc& desc) {
+    if (!desc.is_valid()) {
+        return {};
+    }
+
+    if (desc.width == desc.height && height_field_sample_count_ok(desc.width)) {
+        JPH::HeightFieldShapeSettings settings(desc.heights.data(), JPH::Vec3::sZero(),
+            JPH::Vec3(desc.scale_x, desc.scale_y, desc.scale_z), desc.width);
+        const auto result = settings.Create();
+        if (result.IsValid()) {
+            return result.Get();
+        }
+    }
+
+    JPH::VertexList vertices;
+    vertices.reserve(static_cast<std::size_t>(desc.width) * desc.height);
+    for (std::uint32_t z = 0; z < desc.height; ++z) {
+        for (std::uint32_t x = 0; x < desc.width; ++x) {
+            const float height = desc.heights[static_cast<std::size_t>(z) * desc.width + x];
+            vertices.push_back(JPH::Float3{static_cast<float>(x) * desc.scale_x, height * desc.scale_y,
+                static_cast<float>(z) * desc.scale_z});
+        }
+    }
+
+    JPH::IndexedTriangleList triangles;
+    triangles.reserve(static_cast<std::size_t>(desc.width - 1) * (desc.height - 1) * 2);
+    for (std::uint32_t z = 0; z + 1 < desc.height; ++z) {
+        for (std::uint32_t x = 0; x + 1 < desc.width; ++x) {
+            const auto i0 = z * desc.width + x;
+            const auto i1 = i0 + 1;
+            const auto i2 = i0 + desc.width;
+            const auto i3 = i2 + 1;
+            triangles.push_back(JPH::IndexedTriangle(i0, i2, i1, 0));
+            triangles.push_back(JPH::IndexedTriangle(i1, i2, i3, 0));
+        }
+    }
+
+    JPH::MeshShapeSettings settings(std::move(vertices), std::move(triangles));
+    const auto result = settings.Create();
+    return result.IsValid() ? result.Get() : JPH::RefConst<JPH::Shape>{};
+}
+
 [[nodiscard]] int job_thread_count() {
     const auto hardware = std::thread::hardware_concurrency();
     if (hardware <= 1) {
@@ -289,6 +337,32 @@ public:
         if (desc.angular_velocity != Vec3{}) {
             bodies.SetAngularVelocity(id, to_jolt(desc.angular_velocity));
         }
+        return from_jolt(id);
+    }
+
+    [[nodiscard]] BodyId create_height_field(
+        const HeightFieldShapeDesc& height_field, const BodyDesc& desc) override {
+        if (!height_field.is_valid() || desc.mass < 0.0f || desc.friction < 0.0f ||
+            desc.restitution < 0.0f) {
+            return BodyId{};
+        }
+
+        const auto shape = make_height_field(height_field);
+        if (shape == nullptr) {
+            return BodyId{};
+        }
+
+        auto body = desc;
+        body.motion = BodyMotion::static_body;
+        JPH::BodyCreationSettings settings(shape, to_jolt_pos(body.position), to_jolt(body.rotation),
+            JPH::EMotionType::Static, object_layer(BodyMotion::static_body));
+        settings.mFriction = body.friction;
+        settings.mRestitution = body.restitution;
+
+        auto& bodies = system_.GetBodyInterface();
+        const auto activation =
+            body.activate ? JPH::EActivation::Activate : JPH::EActivation::DontActivate;
+        const auto id = bodies.CreateAndAddBody(settings, activation);
         return from_jolt(id);
     }
 

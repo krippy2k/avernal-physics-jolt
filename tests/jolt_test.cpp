@@ -2,6 +2,9 @@
 
 #include <gtest/gtest.h>
 
+#include <memory>
+#include <vector>
+
 namespace {
 
 [[nodiscard]] std::unique_ptr<avernal::PhysicsWorld> make_world() {
@@ -68,6 +71,43 @@ TEST(JoltWorld, RayCastHitsFloor) {
     EXPECT_EQ(hit->body, floor);
     EXPECT_NEAR(hit->point.y, 0.0f, 0.05f);
     EXPECT_GT(hit->normal.y, 0.5f);
+}
+
+TEST(JoltWorld, HeightFieldSupportsRayAndFall) {
+    auto world = make_world();
+
+    std::vector<float> heights(16 * 16, 0.0f);
+    const auto id = world->create_height_field(
+        {
+            .width = 16,
+            .height = 16,
+            .heights = heights,
+            .scale_x = 1.0f,
+            .scale_z = 1.0f,
+        },
+        {
+            .position = {0.0f, 0.0f, 0.0f},
+            .activate = false,
+        });
+    ASSERT_TRUE(id);
+
+    const auto hit = world->ray_cast({4.0f, 10.0f, 4.0f}, {0.0f, -1.0f, 0.0f}, 20.0f);
+    ASSERT_TRUE(hit.has_value());
+    EXPECT_EQ(hit->body, id);
+    EXPECT_NEAR(hit->point.y, 0.0f, 0.1f);
+
+    const auto sphere = world->create_body({
+        .motion = avernal::BodyMotion::dynamic,
+        .shape = avernal::Shape::sphere(0.5f),
+        .position = {4.0f, 4.0f, 4.0f},
+        .restitution = 0.0f,
+    });
+    ASSERT_TRUE(sphere);
+    for (int i = 0; i < 180; ++i) {
+        world->step(1.0f / 60.0f);
+    }
+    EXPECT_GT(world->pose(sphere).position.y, 0.35f);
+    EXPECT_LT(world->pose(sphere).position.y, 0.85f);
 }
 
 TEST(JoltWorld, DestroyRemovesBody) {
